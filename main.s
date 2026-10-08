@@ -1,227 +1,442 @@
-//*****Datos administrativos************************
-// * Nombre del archivo: main.s
-// * Tipo de archivo:Codigo fuente ensamblador AArch64
-// * Proyecto: Filtros de imagenes PPM
-// * Autor:Dóminick Viales Mora, 	Jahrell Gourzong Ortiz
-//
-//*****Descripcion**********************************
-// * Procesador de imagenes PPM.
-// * Aplica filtros de inversion de color, escala de grises,
-// * sal y pimienta, desenfoque por promedio, y separacion de canales RGB
-// 
-//
-//*****Version**************************************
-// * ## | 07/10/2026 18:00 | Dóminick Viales, Jahrell Gourzong
-// *
-//**************************************************/
+/*****Datos administrativos************************
+ * Nombre del archivo: main.s
+ * Tipo de archivo: Código fuente ensamblador AArch64
+ * Proyecto: Filtros de imágenes PPM
+ * Autor: Dóminick Viales Mora, Jahrell Gourzong Ortiz
+ * Empresa: Instituto Tecnológico de Costa Rica
+ *****Descripción**********************************
+ * Procesador de imágenes PPM. Aplica filtros de inversión de color,
+ * escala de grises, sal y pimienta, desenfoque por promedio y
+ * separación de canales RGB.
+ * Registros globales: x19 descriptor de archivo, x20 bytes leídos,
+ * x26 tamaño del encabezado PPM, x27 bytes de píxeles de la imagen.
+ *****Versión**************************************
+ * 01 | 07/10/2026 18:00 | Dóminick Viales Mora, Jahrell Gourzong Ortiz
+ *
+ **************************************************/
+
+/* Constantes globales */
+.equ STDIN, 0                       // Descriptor de entrada estándar
+.equ STDOUT, 1                      // Descriptor de salida estándar
+.equ STDERR, 2                      // Descriptor de error estándar
+.equ AT_FDCWD, -100                 // Directorio de trabajo actual (openat)
+.equ SYS_READ, 63                   // Número de syscall read
+.equ SYS_WRITE, 64                  // Número de syscall write
+.equ SYS_OPENAT, 56                 // Número de syscall openat
+.equ SYS_CLOSE, 57                  // Número de syscall close
+.equ SYS_EXIT, 93                   // Número de syscall exit
+.equ FLAGS_ESCRITURA, 0x241         // O_WRONLY | O_CREAT | O_TRUNC
+.equ PERMISOS, 0644                 // Permisos del archivo de salida
+.equ RUTA_SIZE, 256                 // Tamaño de los buffers de ruta
+.equ BUFFER_SIZE, 2000000           // Tamaño de los buffers de imagen
+
 .data
-	 Msg_bienvenida: .ascii "\n PROCESADOR DE IMAGENES PPM \n\n"  //Titulo del programa
-	 Len_bienvenida =  .-Msg_bienvenida     //Longitud del mensaje 
+    MensajeBienvenida:  .ascii "\n PROCESADOR DE IMAGENES PPM \n\n"     // Título del programa
+    .equ LEN_BIENVENIDA, . - MensajeBienvenida                          // Longitud del mensaje de bienvenida
 
-	 Msg_menu: .ascii "[1] Aplicar filtro de inversion de color.\n[2] Aplicar filtro de escala de grises.\n[3] Separacion de canales.\n[4] Desenfoque por  promedio.\n[5] Filtro sal y pimienta\n[0] Salir.\n"  //Menu principal del programa
-	 Len_msg_menu = .-Msg_menu              //Longitud del mensaje del menu
-	 Msg_solicitar: .ascii "Introduzca la ubicacion relativa de la imagen:"  //Mensaje para solicitar la ruta de la imagen
-	 Len_solicitar = .-Msg_solicitar        //Longitud del mensaje de solicitud
+    MensajeMenu:        .ascii "[1] Aplicar filtro de inversion de color.\n[2] Aplicar filtro de escala de grises.\n[3] Separacion de canales.\n[4] Desenfoque por  promedio.\n[5] Filtro sal y pimienta\n[0] Salir.\n"  // Menú principal
+    .equ LEN_MENU, . - MensajeMenu                                      // Longitud del menú
 
-	Msg_error_ruta: .ascii "Error:No se pudo abrir el archivo.\n\n"  //Mensaje de error al abrir archivo
-    	Len_error_ruta = .-Msg_error_ruta       //Longitud del mensaje de error de ruta
+    MensajeSolicitar:   .ascii "Introduzca la ubicacion relativa de la imagen:"  // Solicitud de la ruta de la imagen
+    .equ LEN_SOLICITAR, . - MensajeSolicitar                            // Longitud de la solicitud
 
-	Msg_exito_abrir: .ascii "El archivo se abrio correctamente\n\n"  //Mensaje de exito al abrir archivo
-	Len_exito_abrir = .-Msg_exito_abrir     //Longitud del mensaje de exito
+    Error01:            .ascii "Error:No se pudo abrir el archivo.\n\n" // Mensaje a desplegar ante error #01
+    .equ LEN_ERROR01, . - Error01                                       // Longitud del error #01
 
-	Msg_error_eleccion: .ascii "Error: La opcion elegida es invalida!\n\n"  //Mensaje de opcion invalida en el menu
-	Len_msg_error_eleccion = .-Msg_error_eleccion  //Longitud del mensaje de error de eleccion
+    MensajeExitoAbrir:  .ascii "El archivo se abrio correctamente\n\n"  // Mensaje de éxito al abrir el archivo
+    .equ LEN_EXITO_ABRIR, . - MensajeExitoAbrir                         // Longitud del mensaje de éxito
 
-	Msg_imagen_lista:  .ascii "Imagen Lista!!\n\n"
-        Len_msg_imagen_lista= . -Msg_imagen_lista
+    Error02:            .ascii "Error: La opcion elegida es invalida!\n\n"  // Mensaje a desplegar ante error #02
+    .equ LEN_ERROR02, . - Error02                                       // Longitud del error #02
 
-	Sufijo_inverted: .asciz "_inverted"    //Sufijo para archivo de salida del filtro de inversion
-	Sufijo_greyscale: .asciz "_greyscale"  //Sufijo para archivo de salida del filtro de escala de grises
-	Sufijo_saltpeper: .asciz "_saltpeper"  //Sufijo para archivo de salida del filtro sal y pimienta
-	Sufijo_canal_rojo: .asciz "_red"       //Sufijo para archivo de salida del canal rojo
-	Sufijo_canal_verde: .asciz "_green"    //Sufijo para archivo de salida del canal verde
-	Sufijo_canal_azul: .asciz "_blue"      //Sufijo para archivo de salida del canal azul
-	Sufijo_blur: .asciz "_blur"  	       //Sufijo para archivo de salida del filtro de desenfoque
-	Ext_ppm: .asciz ".ppm"  	       //Extension del archivo de salida
+    MensajeImagenLista: .ascii "Imagen Lista!!\n\n"                     // Mensaje de imagen procesada
+    .equ LEN_IMAGEN_LISTA, . - MensajeImagenLista                       // Longitud del mensaje de imagen lista
+
+    SufijoInverted:     .asciz "_inverted"      // Sufijo del archivo de salida de inversión
+    SufijoGreyscale:    .asciz "_greyscale"     // Sufijo del archivo de salida de escala de grises
+    SufijoSaltpeper:    .asciz "_saltpeper"     // Sufijo del archivo de salida de sal y pimienta
+    SufijoCanalRojo:    .asciz "_red"           // Sufijo del archivo de salida del canal rojo
+    SufijoCanalVerde:   .asciz "_green"         // Sufijo del archivo de salida del canal verde
+    SufijoCanalAzul:    .asciz "_blue"          // Sufijo del archivo de salida del canal azul
+    SufijoBlur:         .asciz "_blur"          // Sufijo del archivo de salida del desenfoque
+    ExtPpm:             .asciz ".ppm"           // Extensión del archivo de salida
 
 .bss
-    Ruta_archivo:           .space 256        //Espacio para almacenar la ruta de entrada
-    Ruta_salida:            .space 256        //Espacio para almacenar la ruta de salida
-    Seleccion_usuario:      .space 4          //Espacio para almacenar la seleccion del usuario
-    Buffer_imagen_original: .space 2000000    //Espacio para almacenar la imagen original
-    Buffer_imagen_filtro:   .space 2000000    //Espacio para almacenar la imagen con filtro
-    Buffer_canal_rojo:      .space 2000000    //Espacio para almacenar el canal rojo
-    Buffer_canal_verde:     .space 2000000    //Espacio para almacenar el canal verde
-    Buffer_canal_azul:	    .space 2000000    //Espacio para almacenar el canal azul
+    RutaArchivo:            .space RUTA_SIZE        // Ruta de la imagen de entrada
+    RutaSalida:             .space RUTA_SIZE        // Ruta de la imagen de salida
+    SeleccionUsuario:       .space 4                // Opción elegida por el usuario
+    BufferImagenOriginal:   .space BUFFER_SIZE      // Imagen original sin modificar
+    BufferImagenFiltro:     .space BUFFER_SIZE      // Imagen sobre la que se aplica el filtro
+    BufferCanalRojo:        .space BUFFER_SIZE      // Imagen del canal rojo
+    BufferCanalVerde:       .space BUFFER_SIZE      // Imagen del canal verde
+    BufferCanalAzul:        .space BUFFER_SIZE      // Imagen del canal azul
 
 .text
 .global _start
 
+/*****Nombre***************************************
+ * f01GenerarNombreSalida:
+ *****Descripción**********************************
+ * Genera el nombre del archivo de salida concatenando la ruta de
+ * entrada (sin extensión), el sufijo del filtro y la extensión .ppm.
+ *****Retorno**************************************
+ * Ninguno. El resultado se escribe en RutaSalida.
+ *****Entradas*************************************
+ * x10: Puntero al string del sufijo a agregar al nombre de salida
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f01GenerarNombreSalida:
+    ldr x0, =RutaArchivo            // Puntero de lectura de la ruta de entrada
+    ldr x1, =RutaSalida             // Puntero de escritura de la ruta de salida
+
+    // Ciclo: copia la ruta de entrada hasta el nulo o el punto de la extensión
+f01for01:
+    ldrb w2, [x0], 1                // Carácter actual de la ruta
+    cmp w2, 0
+    beq f01finfor01
+    cmp w2, '.'
+    beq f01finfor01
+    strb w2, [x1], 1
+    b f01for01
+
+f01finfor01:
+    mov x2, x10                     // Puntero de lectura del sufijo
+
+    // Ciclo: agrega el sufijo del filtro a la ruta de salida
+f01for02:
+    ldrb w3, [x2], 1                // Carácter actual del sufijo
+    cmp w3, 0
+    beq f01finfor02
+    strb w3, [x1], 1
+    b f01for02
+
+f01finfor02:
+    ldr x2, =ExtPpm                 // Puntero de lectura de la extensión
+
+    // Ciclo: agrega la extensión .ppm y el nulo final
+f01for03:
+    ldrb w3, [x2], 1                // Carácter actual de la extensión
+    strb w3, [x1], 1
+    cmp w3, 0
+    bne f01for03
+    ret
+
+/*****Nombre***************************************
+ * f02CopiarABuffersCanal:
+ *****Descripción**********************************
+ * Copia x2 bytes desde el buffer origen (x0) al buffer destino (x1).
+ * Usada para duplicar la imagen original en los buffers de canal.
+ *****Retorno**************************************
+ * Ninguno.
+ *****Entradas*************************************
+ * x0: Puntero al buffer de origen
+ * x1: Puntero al buffer de destino
+ * x2: Cantidad de bytes a copiar
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f02CopiarABuffersCanal:
+    // Ciclo: copia byte a byte hasta agotar el contador
+f02for01:
+    cbz x2, f02finfor01             // x2: Cantidad de bytes restantes (entrada)
+    ldrb w3, [x0], 1                // x0: Buffer de origen (entrada)
+    strb w3, [x1], 1                // x1: Buffer de destino (entrada)
+    sub x2, x2, 1
+    b f02for01
+
+f02finfor01:
+    ret
+
+/*****Nombre***************************************
+ * f03MostrarBienvenida:
+ *****Descripción**********************************
+ * Punto de entrada del programa. Imprime el título y continúa
+ * con la solicitud de la ruta de la imagen.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f04SolicitarRuta.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
 _start:
-    mov x0, 1
-    ldr x1, =Msg_bienvenida
-    ldr x2, =Len_bienvenida
-    mov x8, 64
+f03MostrarBienvenida:
+    mov x0, STDOUT                  // Descriptor de salida estándar
+    ldr x1, =MensajeBienvenida      // Dirección del mensaje a imprimir
+    ldr x2, =LEN_BIENVENIDA         // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    b solicitar_ruta
+    b f04SolicitarRuta
 
-solicitar_ruta:
-    mov x0, 1
-    ldr x1, =Msg_solicitar
-    ldr x2, =Len_solicitar
-    mov x8, 64
+/*****Nombre***************************************
+ * f04SolicitarRuta:
+ *****Descripción**********************************
+ * Solicita al usuario la ruta de la imagen, la lee desde la entrada
+ * estándar y reemplaza el salto de línea final por un nulo.
+ *****Retorno**************************************
+ * Ninguno. La ruta queda en RutaArchivo. Continúa en f05AbrirArchivo.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f04SolicitarRuta:
+    mov x0, STDOUT                  // Descriptor de salida estándar
+    ldr x1, =MensajeSolicitar       // Dirección del mensaje a imprimir
+    ldr x2, =LEN_SOLICITAR          // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-    mov x0, 0
-    ldr x1, =Ruta_archivo
-    mov x2, 255
-    mov x8, 63
+    mov x0, STDIN                   // Descriptor de entrada estándar
+    ldr x1, =RutaArchivo            // Buffer donde se guarda la ruta
+    mov x2, RUTA_SIZE - 1           // Máximo de caracteres a leer
+    mov x8, SYS_READ                // Syscall read
     svc 0
 
-    sub x0, x0, 1
-    ldr x1, =Ruta_archivo
-    strb wzr, [x1, x0]
+    sub x0, x0, 1                   // Posición del salto de línea leído
+    ldr x1, =RutaArchivo            // Dirección base de la ruta
+    strb wzr, [x1, x0]              // Reemplaza el salto de línea por nulo
 
-abrir_archivo:
-    mov x0, -100
-    ldr x1, =Ruta_archivo
-    mov x2, 0
-    mov x8, 56
+/*****Nombre***************************************
+ * f05AbrirArchivo:
+ *****Descripción**********************************
+ * Abre en modo lectura el archivo indicado en RutaArchivo.
+ *****Retorno**************************************
+ * x19: Descriptor del archivo abierto
+ *****Entradas*************************************
+ * Ninguna. Usa la ruta almacenada en RutaArchivo.
+ *****Errores**************************************
+ * 01: No se pudo abrir el archivo
+ **************************************************/
+f05AbrirArchivo:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaArchivo            // Ruta del archivo a abrir
+    mov x2, 0                       // Flags: solo lectura
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
 
     cmp x0, 0
-    blt error_ruta
-    mov x19, x0
+    blt f25ErrorRuta
+    mov x19, x0                     // Descriptor del archivo de entrada
 
-leer_archivo:
-    mov x0, x19
-    ldr x1, =Buffer_imagen_original
-    ldr x2, =2000000
-    mov x8, 63
+/*****Nombre***************************************
+ * f06LeerArchivo:
+ *****Descripción**********************************
+ * Lee el archivo abierto en el buffer de imagen original, lo cierra
+ * e informa al usuario que se abrió correctamente.
+ *****Retorno**************************************
+ * x20: Cantidad de bytes leídos
+ *****Entradas*************************************
+ * x19: Descriptor del archivo abierto
+ *****Errores**************************************
+ * 01: No se pudo leer el archivo
+ **************************************************/
+f06LeerArchivo:
+    mov x0, x19                     // Descriptor del archivo a leer
+    ldr x1, =BufferImagenOriginal   // Buffer destino de la lectura
+    ldr x2, =BUFFER_SIZE            // Máximo de bytes a leer
+    mov x8, SYS_READ                // Syscall read
     svc 0
 
     cmp x0, 0
-    ble error_ruta
-    mov x20, x0
+    ble f25ErrorRuta
+    mov x20, x0                     // Cantidad de bytes leídos
 
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor del archivo a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
 
-    mov x0, 1
-    ldr x1, =Msg_exito_abrir
-    ldr x2, =Len_exito_abrir
-    mov x8, 64
+    mov x0, STDOUT                  // Descriptor de salida estándar
+    ldr x1, =MensajeExitoAbrir      // Dirección del mensaje a imprimir
+    ldr x2, =LEN_EXITO_ABRIR        // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-    b copiar_imagen
+    b f07CopiarImagen
 
-copiar_imagen:
-    ldr x0, =Buffer_imagen_original
-    ldr x1, =Buffer_imagen_filtro
-    mov x2, x20
+/*****Nombre***************************************
+ * f07CopiarImagen:
+ *****Descripción**********************************
+ * Copia la imagen original al buffer sobre el que se aplicarán
+ * los filtros.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f08BuscarInicioPixeles.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f07CopiarImagen:
+    ldr x0, =BufferImagenOriginal   // Puntero de origen
+    ldr x1, =BufferImagenFiltro     // Puntero de destino
+    mov x2, x20                     // Contador de bytes restantes
 
-loop_copia_imagen:
-    cbz x2, fin_loop_copiar_imagen
-    ldrb w3, [x0], 1
+    // Ciclo: copia byte a byte la imagen original
+f07for01:
+    cbz x2, f07finfor01
+    ldrb w3, [x0], 1                // Byte actual de la imagen
     strb w3, [x1], 1
     sub x2, x2, 1
-    b loop_copia_imagen
+    b f07for01
 
-fin_loop_copiar_imagen:
-    b apuntar_inicio_imagen
+f07finfor01:
+    b f08BuscarInicioPixeles
 
-apuntar_inicio_imagen:
-    ldr x25, =Buffer_imagen_filtro
-    mov x21, 0
+/*****Nombre***************************************
+ * f08BuscarInicioPixeles:
+ *****Descripción**********************************
+ * Recorre el encabezado PPM (tres saltos de línea) para calcular
+ * el tamaño del encabezado y la cantidad de bytes de píxeles.
+ *****Retorno**************************************
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f08BuscarInicioPixeles:
+    ldr x25, =BufferImagenFiltro    // Puntero de recorrido del encabezado
+    mov x21, 0                      // Contador de saltos de línea encontrados
 
-buscar_inicio_buffer:
-    ldrb w0, [x25], 1
+    // Ciclo: avanza hasta encontrar el tercer salto de línea
+f08for01:
+    ldrb w0, [x25], 1               // Carácter actual del encabezado
     cmp w0, 10
-    bne buscar_inicio_buffer
+    bne f08for01
     add x21, x21, 1
     cmp x21, 3
-    blt buscar_inicio_buffer
+    blt f08for01
 
-    ldr x0, =Buffer_imagen_filtro
-    sub x26, x25, x0
-    sub x27, x20, x26
-    b mostrar_Menu
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen
+    sub x26, x25, x0                // Tamaño del encabezado
+    sub x27, x20, x26               // Bytes de píxeles
+    b f09MostrarMenu
 
-mostrar_Menu:
-    mov x0, 1
-    ldr x1, =Msg_menu
-    ldr x2, =Len_msg_menu
-    mov x8, 64
+/*****Nombre***************************************
+ * f09MostrarMenu:
+ *****Descripción**********************************
+ * Imprime el menú principal.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f10ProcesarSeleccion.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f09MostrarMenu:
+    mov x0, STDOUT                  // Descriptor de salida estándar
+    ldr x1, =MensajeMenu            // Dirección del mensaje a imprimir
+    ldr x2, =LEN_MENU               // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-procesar_seleccion_usuario:
-    mov x0, 0
-    ldr x1, =Seleccion_usuario
-    mov x2, 2
-    mov x8, 63
+/*****Nombre***************************************
+ * f10ProcesarSeleccion:
+ *****Descripción**********************************
+ * Lee la opción del usuario y salta a la función del filtro
+ * correspondiente.
+ *****Retorno**************************************
+ * Ninguno. Continúa en la función de la opción elegida.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * 02: La opción elegida es inválida
+ **************************************************/
+f10ProcesarSeleccion:
+    mov x0, STDIN                   // Descriptor de entrada estándar
+    ldr x1, =SeleccionUsuario       // Buffer donde se guarda la opción
+    mov x2, 2                       // Cantidad de caracteres a leer
+    mov x8, SYS_READ                // Syscall read
     svc 0
 
-    ldrb w0, [x1]
+    ldrb w0, [x1]                   // Carácter de la opción elegida
     cmp w0, '1'
-    beq filtro_invertir_color
+    beq f11FiltroInversion
 
     cmp w0, '2'
-    beq filtro_escala_grises
+    beq f12FiltroEscalaGrises
 
     cmp w0, '3'
-    beq separacion_canal_rojo
+    beq f16SepararCanalRojo
 
     cmp w0, '4'
-    beq filtro_desenfoque
+    beq f14FiltroDesenfoque
 
     cmp w0, '5'
-    beq filtro_sal_pimienta
+    beq f13FiltroSalPimienta
 
     cmp w0, '0'
-    beq salir
+    beq f27Salir
 
-    b error_eleccion_usuario
+    b f26ErrorEleccion
 
-filtro_invertir_color:
-    ldr x10, =Sufijo_inverted
+/*****Nombre***************************************
+ * f11FiltroInversion:
+ *****Descripción**********************************
+ * Invierte el color de cada byte de píxel (XOR con 0xFF).
+ *****Retorno**************************************
+ * Ninguno. Continúa en f22EscribirArchivoInversion.
+ *****Entradas*************************************
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f11FiltroInversion:
+    ldr x10, =SufijoInverted        // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_imagen_filtro
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen
+    add x0, x0, x26                 // Puntero al primer píxel
+    mov x2, x27                     // Contador de bytes restantes
 
-loop_aplicar_filtro_inversion:
-    cbz x2, fin_inversion
-    ldrb w3, [x0]
+    // Ciclo: invierte cada byte de píxel
+f11for01:
+    cbz x2, f11finfor01
+    ldrb w3, [x0]                   // Valor del byte actual
     eor w3, w3, #0xFF
     strb w3, [x0], 1
     sub x2, x2, 1
-    b loop_aplicar_filtro_inversion
+    b f11for01
 
-fin_inversion:
-    b escribir_archivo_inversion
+f11finfor01:
+    b f22EscribirArchivoInversion
 
-filtro_escala_grises:
-    ldr x10, =Sufijo_greyscale
+/*****Nombre***************************************
+ * f12FiltroEscalaGrises:
+ *****Descripción**********************************
+ * Reemplaza cada píxel por el promedio de sus componentes R, G y B.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f15FinalizarFiltro.
+ *****Entradas*************************************
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f12FiltroEscalaGrises:
+    ldr x10, =SufijoGreyscale       // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_imagen_filtro
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen
+    add x0, x0, x26                 // Puntero al píxel actual
+    mov x2, x27                     // Contador de bytes restantes
 
-loop_aplicar_escala_grises:
+    // Ciclo: procesa un píxel (3 bytes) por iteración
+f12for01:
     cmp x2, 2
-    ble fin_aplicacion_filtros
+    ble f15FinalizarFiltro
 
-    ldrb w3, [x0]
-    ldrb w4, [x0, 1]
-    ldrb w5, [x0, 2]
+    ldrb w3, [x0]                   // Componente rojo
+    ldrb w4, [x0, 1]                // Componente verde
+    ldrb w5, [x0, 2]                // Componente azul
 
-    add w6, w3, w4
+    add w6, w3, w4                  // Suma de componentes
     add w6, w6, w5
-    mov w7, 3
-    udiv w6, w6, w7
+    mov w7, 3                       // Divisor del promedio
+    udiv w6, w6, w7                 // Promedio (nivel de gris)
 
     strb w6, [x0]
     strb w6, [x0, 1]
@@ -229,124 +444,157 @@ loop_aplicar_escala_grises:
 
     add x0, x0, 3
     sub x2, x2, 3
-    b loop_aplicar_escala_grises
+    b f12for01
 
-filtro_sal_pimienta:
-    ldr x10, =Sufijo_saltpeper
+/*****Nombre***************************************
+ * f13FiltroSalPimienta:
+ *****Descripción**********************************
+ * Reemplaza aleatoriamente píxeles por negro o blanco usando un
+ * generador congruencial lineal inicializado con el contador de tiempo.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f15FinalizarFiltro.
+ *****Entradas*************************************
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f13FiltroSalPimienta:
+    ldr x10, =SufijoSaltpeper       // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_imagen_filtro
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen
+    add x0, x0, x26                 // Puntero al píxel actual
+    mov x2, x27                     // Contador de bytes restantes
 
-    mrs x9, cntvct_el0
-    mov x13, #2531
+    mrs x9, cntvct_el0              // Estado del generador (semilla)
+    mov x13, #2531                  // Incremento del generador (parte base)
     lsl x13, x13, #10
-    add x13, x13, #35
-    movk x11, #0x6c07, lsl 0
-    movk x11, #0x343f, lsl 16
+    add x13, x13, #35               // Incremento del generador
+    mov x11, #0x6c07                // Multiplicador del generador (parte baja)
+    movk x11, #0x343f, lsl 16       // Multiplicador del generador (parte alta)
 
-loop_sal_pimienta:
+    // Ciclo: decide por píxel si se altera y con qué color
+f13for01:
     cmp x2, 2
-    ble fin_aplicacion_filtros
+    ble f15FinalizarFiltro
 
     mul x9, x9, x11
     add x9, x9, x13
-    lsr x12, x9, #30
+    lsr x12, x9, #30                // Bits aleatorios: ¿se altera el píxel?
     and x12, x12, #3
     cmp x12, 0
-    bne sig_pixel
+    bne f13sigpixel
 
     mul x9, x9, x11
     add x9, x9, x13
-    lsr x12, x9, #31
+    lsr x12, x9, #31                // Bit aleatorio: negro (1) o blanco (0)
     and x12, x12, #1
     cmp x12, 0
-    beq pixel_blanco
+    beq f13pixelblanco
 
-pixel_negro:
+f13pixelnegro:
     strb wzr, [x0]
     strb wzr, [x0, 1]
     strb wzr, [x0, 2]
-    b sig_pixel
+    b f13sigpixel
 
-pixel_blanco:
-    mov w13, #255
+f13pixelblanco:
+    mov w13, #255                   // Valor blanco
     strb w13, [x0]
     strb w13, [x0, 1]
     strb w13, [x0, 2]
 
-sig_pixel:
+f13sigpixel:
     add x0, x0, 3
     sub x2, x2, 3
-    b loop_sal_pimienta
+    b f13for01
 
-filtro_desenfoque:
-    ldr x10, =Sufijo_blur
+/*****Nombre***************************************
+ * f14FiltroDesenfoque:
+ *****Descripción**********************************
+ * Reemplaza cada byte interno de la imagen por el promedio de los
+ * 9 bytes vecinos del mismo canal, leídos de la imagen original.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f15FinalizarFiltro.
+ *****Entradas*************************************
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f14FiltroDesenfoque:
+    ldr x10, =SufijoBlur            // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_imagen_filtro
-    add x2, x0, 3
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen
+    add x2, x0, 3                   // Puntero al ancho (después de "P6\n")
 
-    mov x14, 0
-parse_width_loop:
-    ldrb w4, [x2], 1
+    mov x14, 0                      // Ancho de la imagen en píxeles
+
+    // Ciclo: convierte el ancho de texto decimal a número
+f14forancho01:
+    ldrb w4, [x2], 1                // Carácter actual del ancho
     cmp w4, ' '
-    beq parse_width_done
+    beq f14finforancho01
     cmp w4, 10
-    beq parse_width_done
+    beq f14finforancho01
     sub w4, w4, '0'
-    mov x5, 10
+    mov x5, 10                      // Base decimal
     mul x14, x14, x5
     add x14, x14, x4
-    b parse_width_loop
+    b f14forancho01
 
-parse_width_done:
-    mov x15, 3
-    mul x15, x14, x15
+f14finforancho01:
+    mov x15, 3                      // Bytes por píxel
+    mul x15, x14, x15               // Bytes por fila
 
-    udiv x16, x27, x15
+    udiv x16, x27, x15              // Alto de la imagen en píxeles
 
-    ldr x1, =Buffer_imagen_original
-    add x1, x1, x26
-    ldr x0, =Buffer_imagen_filtro
-    add x0, x0, x26
+    ldr x1, =BufferImagenOriginal   // Dirección base de la imagen original
+    add x1, x1, x26                 // Puntero a los píxeles originales
+    ldr x0, =BufferImagenFiltro     // Dirección base de la imagen filtrada
+    add x0, x0, x26                 // Puntero a los píxeles filtrados
 
     cmp x14, 3
-    blt fin_aplicacion_filtros
+    blt f15FinalizarFiltro
     cmp x16, 3
-    blt fin_aplicacion_filtros
+    blt f15FinalizarFiltro
 
-    mov x17, 1
+    mov x17, 1                      // Fila actual y
 
-loop_y_blur:
-    sub x4, x16, 1
+    // Ciclo: recorre las filas internas de la imagen
+f14fory01:
+    sub x4, x16, 1                  // Límite superior de filas
     cmp x17, x4
-    beq fin_aplicacion_filtros
+    beq f15FinalizarFiltro
 
-    mov x18, 1
+    mov x18, 1                      // Columna actual x
 
-loop_x_blur:
-    sub x4, x14, 1
+    // Ciclo: recorre las columnas internas de la fila
+f14forx01:
+    sub x4, x14, 1                  // Límite superior de columnas
     cmp x18, x4
-    beq next_y_blur
+    beq f14sigy01
 
-    mul x12, x17, x15
-    mov x4, 3
+    mul x12, x17, x15               // Desplazamiento de la fila
+    mov x4, 3                       // Bytes por píxel
     mul x5, x18, x4
-    add x12, x12, x5
+    add x12, x12, x5                // Desplazamiento del píxel
 
-    mov x13, 0
+    mov x13, 0                      // Canal actual (0=R, 1=G, 2=B)
 
-loop_channel_blur:
+    // Ciclo: promedia los 9 vecinos de cada canal del píxel
+f14forcanal01:
     cmp x13, 3
-    beq next_x_blur
+    beq f14sigx01
 
-    add x22, x12, x13
+    add x22, x12, x13               // Desplazamiento del byte actual
 
-    mov x23, 0
+    mov x23, 0                      // Acumulador de la suma de vecinos
 
-    sub x4, x22, x15
+    // Fila superior
+    sub x4, x22, x15                // Desplazamiento del vecino superior izquierdo
     sub x4, x4, 3
     ldrb w5, [x1, x4]
     add x23, x23, x5
@@ -359,6 +607,7 @@ loop_channel_blur:
     ldrb w5, [x1, x4]
     add x23, x23, x5
 
+    // Fila central
     sub x4, x22, 3
     ldrb w5, [x1, x4]
     add x23, x23, x5
@@ -371,6 +620,7 @@ loop_channel_blur:
     ldrb w5, [x1, x4]
     add x23, x23, x5
 
+    // Fila inferior
     add x4, x22, x15
     sub x4, x4, 3
     ldrb w5, [x1, x4]
@@ -384,308 +634,384 @@ loop_channel_blur:
     ldrb w5, [x1, x4]
     add x23, x23, x5
 
-    mov x4, 9
+    mov x4, 9                       // Divisor del promedio
     udiv x23, x23, x4
 
     strb w23, [x0, x22]
 
     add x13, x13, 1
-    b loop_channel_blur
+    b f14forcanal01
 
-next_x_blur:
+f14sigx01:
     add x18, x18, 1
-    b loop_x_blur
+    b f14forx01
 
-next_y_blur:
+f14sigy01:
     add x17, x17, 1
-    b loop_y_blur
+    b f14fory01
 
-fin_aplicacion_filtros:
-    b escribir_archivo
+/*****Nombre***************************************
+ * f15FinalizarFiltro:
+ *****Descripción**********************************
+ * Punto común de salida de los filtros que usan BufferImagenFiltro.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f23EscribirArchivo.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f15FinalizarFiltro:
+    b f23EscribirArchivo
 
-//*****Nombre***************************************
-// * f01GenerarNombreSalida:
-//
-//*****Descripcion**********************************
-// * Genera el nombre del archivo de salida concatenando la ruta de
-// * entrada (sin extension), el sufijo del filtro y la extension .ppm.
-//
-//*****Retorno**************************************
-// * Ninguno. El resultado se escribe en Ruta_salida.
-//
-//*****Entradas*************************************
-// * x10: Puntero al string del sufijo a agregar al nombre de salida
-//
-//*****Errores**************************************
-// * Ninguno
-//
-//**************************************************/
-f01GenerarNombreSalida:
-    ldr x0, =Ruta_archivo
-    ldr x1, =Ruta_salida
-
-f01loop1:
-    ldrb w2, [x0], 1
-    cmp w2, 0
-    beq f01appendsuffix
-    cmp w2, '.'
-    beq f01appendsuffix
-    strb w2, [x1], 1
-    b f01loop1
-
-f01appendsuffix:
-    mov x2, x10             //x10: Puntero al sufijo del filtro (entrada)
-
-f01loop2:
-    ldrb w3, [x2], 1
-    cmp w3, 0
-    beq f01appendext
-    strb w3, [x1], 1
-    b f01loop2
-
-f01appendext:
-    ldr x2, =Ext_ppm
-
-f01loop3:
-    ldrb w3, [x2], 1
-    strb w3, [x1], 1
-    cmp w3, 0
-    bne f01loop3
-    ret
-
-//*****Nombre***************************************
-// * f02CopiarABuffersCanal:
-//
-//*****Descripcion**********************************
-// * Copia x2 bytes desde el buffer origen (x0) al buffer destino (x1).
-// * Usada para duplicar la imagen original en los buffers de canal.
-//
-//*****Retorno**************************************
-// * Ninguno.
-//
-//*****Entradas*************************************
-// * x0: Puntero al buffer de origen
-// * x1: Puntero al buffer de destino
-// * x2: Cantidad de bytes a copiar
-//
-//*****Errores**************************************
-// * Ninguno
-//
-//**************************************************/
-f02CopiarABuffersCanal:
-    cbz x2, f02fincopiar    //x2: Cantidad de bytes a copiar (entrada)
-    ldrb w3, [x0], 1        //x0: Buffer de origen (entrada)
-    strb w3, [x1], 1        //x1: Buffer de destino (entrada)
-    sub x2, x2, 1
-    b f02CopiarABuffersCanal
-
-f02fincopiar:
-    ret
-
-separacion_canal_rojo:
-    ldr x0, =Buffer_imagen_original
-    ldr x1, =Buffer_canal_rojo
-    mov x2, x20
+/*****Nombre***************************************
+ * f16SepararCanalRojo:
+ *****Descripción**********************************
+ * Genera la imagen del canal rojo (verde y azul en cero).
+ *****Retorno**************************************
+ * Ninguno. Continúa en f17EscribirCanalRojo.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f16SepararCanalRojo:
+    ldr x0, =BufferImagenOriginal   // Puntero de origen
+    ldr x1, =BufferCanalRojo        // Puntero de destino
+    mov x2, x20                     // Cantidad de bytes a copiar
     bl f02CopiarABuffersCanal
 
-    ldr x10, =Sufijo_canal_rojo
+    ldr x10, =SufijoCanalRojo       // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_canal_rojo
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferCanalRojo        // Dirección base del canal rojo
+    add x0, x0, x26                 // Puntero al píxel actual
+    mov x2, x27                     // Contador de bytes restantes
 
-loop_separar_rojo:
-    cbz x2, escribir_canal_rojo
-    ldrb w3, [x0]
+    // Ciclo: conserva el rojo y borra verde y azul de cada píxel
+f16for01:
+    cbz x2, f17EscribirCanalRojo
+    ldrb w3, [x0]                   // Componente rojo
     strb w3, [x0], 1
 
-    mov w3, 0
+    mov w3, 0                       // Valor cero para verde y azul
     strb w3, [x0], 1
     strb w3, [x0], 1
 
     sub x2, x2, 3
-    b loop_separar_rojo
+    b f16for01
 
-escribir_canal_rojo:
-    mov x0, -100
-    ldr x1, =Ruta_salida
-    mov x2, 0x241
-    mov x3, 0644
-    mov x8, 56
+/*****Nombre***************************************
+ * f17EscribirCanalRojo:
+ *****Descripción**********************************
+ * Escribe el archivo del canal rojo y continúa con el canal verde.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f18SepararCanalVerde.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f17EscribirCanalRojo:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaSalida             // Ruta del archivo de salida
+    mov x2, FLAGS_ESCRITURA         // Flags de apertura para escritura
+    mov x3, PERMISOS                // Permisos del archivo creado
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
-    mov x19, x0
-    mov x0, x19
-    ldr x1, =Buffer_canal_rojo
-    mov x2, x20
-    mov x8, 64
+    mov x19, x0                     // Descriptor del archivo de salida
+    mov x0, x19                     // Descriptor donde se escribe
+    ldr x1, =BufferCanalRojo        // Buffer a escribir
+    mov x2, x20                     // Cantidad de bytes a escribir
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
-    b separacion_canal_verde
+    b f18SepararCanalVerde
 
-separacion_canal_verde:
-    ldr x0, =Buffer_imagen_original
-    ldr x1, =Buffer_canal_verde
-    mov x2, x20
+/*****Nombre***************************************
+ * f18SepararCanalVerde:
+ *****Descripción**********************************
+ * Genera la imagen del canal verde (rojo y azul en cero).
+ *****Retorno**************************************
+ * Ninguno. Continúa en f19EscribirCanalVerde.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f18SepararCanalVerde:
+    ldr x0, =BufferImagenOriginal   // Puntero de origen
+    ldr x1, =BufferCanalVerde       // Puntero de destino
+    mov x2, x20                     // Cantidad de bytes a copiar
     bl f02CopiarABuffersCanal
 
-    ldr x10, =Sufijo_canal_verde
+    ldr x10, =SufijoCanalVerde      // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_canal_verde
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferCanalVerde       // Dirección base del canal verde
+    add x0, x0, x26                 // Puntero al píxel actual
+    mov x2, x27                     // Contador de bytes restantes
 
-loop_separar_verde:
-    cbz x2, escribir_canal_verde
-    mov w3, 0
+    // Ciclo: conserva el verde y borra rojo y azul de cada píxel
+f18for01:
+    cbz x2, f19EscribirCanalVerde
+    mov w3, 0                       // Valor cero para rojo
     strb w3, [x0], 1
 
-    ldrb w3, [x0]
+    ldrb w3, [x0]                   // Componente verde
     strb w3, [x0], 1
 
-    mov w3, 0
+    mov w3, 0                       // Valor cero para azul
     strb w3, [x0], 1
 
     sub x2, x2, 3
-    b loop_separar_verde
+    b f18for01
 
-escribir_canal_verde:
-    mov x0, -100
-    ldr x1, =Ruta_salida
-    mov x2, 0x241
-    mov x3, 0644
-    mov x8, 56
+/*****Nombre***************************************
+ * f19EscribirCanalVerde:
+ *****Descripción**********************************
+ * Escribe el archivo del canal verde y continúa con el canal azul.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f20SepararCanalAzul.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f19EscribirCanalVerde:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaSalida             // Ruta del archivo de salida
+    mov x2, FLAGS_ESCRITURA         // Flags de apertura para escritura
+    mov x3, PERMISOS                // Permisos del archivo creado
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
-    mov x19, x0
-    mov x0, x19
-    ldr x1, =Buffer_canal_verde
-    mov x2, x20
-    mov x8, 64
+    mov x19, x0                     // Descriptor del archivo de salida
+    mov x0, x19                     // Descriptor donde se escribe
+    ldr x1, =BufferCanalVerde       // Buffer a escribir
+    mov x2, x20                     // Cantidad de bytes a escribir
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
-    b separacion_canal_azul
+    b f20SepararCanalAzul
 
-separacion_canal_azul:
-    ldr x0, =Buffer_imagen_original
-    ldr x1, =Buffer_canal_azul
-    mov x2, x20
+/*****Nombre***************************************
+ * f20SepararCanalAzul:
+ *****Descripción**********************************
+ * Genera la imagen del canal azul (rojo y verde en cero).
+ *****Retorno**************************************
+ * Ninguno. Continúa en f21EscribirCanalAzul.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ * x26: Tamaño del encabezado en bytes
+ * x27: Cantidad de bytes de píxeles
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f20SepararCanalAzul:
+    ldr x0, =BufferImagenOriginal   // Puntero de origen
+    ldr x1, =BufferCanalAzul        // Puntero de destino
+    mov x2, x20                     // Cantidad de bytes a copiar
     bl f02CopiarABuffersCanal
 
-    ldr x10, =Sufijo_canal_azul
+    ldr x10, =SufijoCanalAzul       // Sufijo del archivo de salida
     bl f01GenerarNombreSalida
 
-    ldr x0, =Buffer_canal_azul
-    add x0, x0, x26
-    mov x2, x27
+    ldr x0, =BufferCanalAzul        // Dirección base del canal azul
+    add x0, x0, x26                 // Puntero al píxel actual
+    mov x2, x27                     // Contador de bytes restantes
 
-loop_separar_azul:
-    cbz x2, escribir_canal_azul
-    mov w3, 0
+    // Ciclo: conserva el azul y borra rojo y verde de cada píxel
+f20for01:
+    cbz x2, f21EscribirCanalAzul
+    mov w3, 0                       // Valor cero para rojo
     strb w3, [x0], 1
 
-    mov w3, 0
+    mov w3, 0                       // Valor cero para verde
     strb w3, [x0], 1
 
-    ldrb w3, [x0]
+    ldrb w3, [x0]                   // Componente azul
     strb w3, [x0], 1
 
     sub x2, x2, 3
-    b loop_separar_azul
+    b f20for01
 
-escribir_canal_azul:
-    mov x0, -100
-    ldr x1, =Ruta_salida
-    mov x2, 0x241
-    mov x3, 0644
-    mov x8, 56
+/*****Nombre***************************************
+ * f21EscribirCanalAzul:
+ *****Descripción**********************************
+ * Escribe el archivo del canal azul y muestra el mensaje final.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f24ImprimirImagenLista.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f21EscribirCanalAzul:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaSalida             // Ruta del archivo de salida
+    mov x2, FLAGS_ESCRITURA         // Flags de apertura para escritura
+    mov x3, PERMISOS                // Permisos del archivo creado
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
-    mov x19, x0
-    mov x0, x19
-    ldr x1, =Buffer_canal_azul
-    mov x2, x20
-    mov x8, 64
+    mov x19, x0                     // Descriptor del archivo de salida
+    mov x0, x19                     // Descriptor donde se escribe
+    ldr x1, =BufferCanalAzul        // Buffer a escribir
+    mov x2, x20                     // Cantidad de bytes a escribir
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
-    b imprimir_mensaje_imagen_lista
+    b f24ImprimirImagenLista
 
-escribir_archivo_inversion:
-    mov x0, -100
-    ldr x1, =Ruta_salida
-    mov x2, 0x241
-    mov x3, 0644
-    mov x8, 56
+/*****Nombre***************************************
+ * f22EscribirArchivoInversion:
+ *****Descripción**********************************
+ * Escribe la imagen invertida y restaura el buffer de trabajo con
+ * la imagen original, ya que el filtro de inversión se aplica
+ * sobre BufferImagenFiltro.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f24ImprimirImagenLista.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f22EscribirArchivoInversion:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaSalida             // Ruta del archivo de salida
+    mov x2, FLAGS_ESCRITURA         // Flags de apertura para escritura
+    mov x3, PERMISOS                // Permisos del archivo creado
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
 
-    mov x19, x0
-    mov x0, x19
-    ldr x1, =Buffer_imagen_filtro
-    mov x2, x20
-    mov x8, 64
+    mov x19, x0                     // Descriptor del archivo de salida
+    mov x0, x19                     // Descriptor donde se escribe
+    ldr x1, =BufferImagenFiltro     // Buffer a escribir
+    mov x2, x20                     // Cantidad de bytes a escribir
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
 
-    ldr x0, =Buffer_imagen_original
-    ldr x1, =Buffer_imagen_filtro
-    mov x2, x20
+    ldr x0, =BufferImagenOriginal   // Puntero de origen
+    ldr x1, =BufferImagenFiltro     // Puntero de destino
+    mov x2, x20                     // Cantidad de bytes a copiar
     bl f02CopiarABuffersCanal
-    b imprimir_mensaje_imagen_lista
+    b f24ImprimirImagenLista
 
-escribir_archivo:
-    mov x0, -100
-    ldr x1, =Ruta_salida
-    mov x2, 0x241
-    mov x3, 0644
-    mov x8, 56
+/*****Nombre***************************************
+ * f23EscribirArchivo:
+ *****Descripción**********************************
+ * Escribe en el archivo de salida el contenido de BufferImagenFiltro.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f24ImprimirImagenLista.
+ *****Entradas*************************************
+ * x20: Cantidad de bytes de la imagen
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f23EscribirArchivo:
+    mov x0, AT_FDCWD                // Directorio base: el actual
+    ldr x1, =RutaSalida             // Ruta del archivo de salida
+    mov x2, FLAGS_ESCRITURA         // Flags de apertura para escritura
+    mov x3, PERMISOS                // Permisos del archivo creado
+    mov x8, SYS_OPENAT              // Syscall openat
     svc 0
 
-    mov x19, x0
-    mov x0, x19
-    ldr x1, =Buffer_imagen_filtro
-    mov x2, x20
-    mov x8, 64
+    mov x19, x0                     // Descriptor del archivo de salida
+    mov x0, x19                     // Descriptor donde se escribe
+    ldr x1, =BufferImagenFiltro     // Buffer a escribir
+    mov x2, x20                     // Cantidad de bytes a escribir
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-    mov x0, x19
-    mov x8, 57
+    mov x0, x19                     // Descriptor a cerrar
+    mov x8, SYS_CLOSE               // Syscall close
     svc 0
-    b imprimir_mensaje_imagen_lista
+    b f24ImprimirImagenLista
 
-imprimir_mensaje_imagen_lista:
-    mov x0, 1
-    ldr x1, =Msg_imagen_lista
-    ldr x2, =Len_msg_imagen_lista
-    mov x8, #64
+/*****Nombre***************************************
+ * f24ImprimirImagenLista:
+ *****Descripción**********************************
+ * Informa que la imagen fue procesada y regresa al menú.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f09MostrarMenu.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f24ImprimirImagenLista:
+    mov x0, STDOUT                  // Descriptor de salida estándar
+    ldr x1, =MensajeImagenLista     // Dirección del mensaje a imprimir
+    ldr x2, =LEN_IMAGEN_LISTA       // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
 
-    b mostrar_Menu
+    b f09MostrarMenu
 
-error_ruta:
-    mov x0, 2
-    ldr x1, =Msg_error_ruta
-    ldr x2, =Len_error_ruta
-    mov x8, 64
+/*****Nombre***************************************
+ * f25ErrorRuta:
+ *****Descripción**********************************
+ * Muestra el error de apertura/lectura de archivo y vuelve a
+ * solicitar la ruta.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f04SolicitarRuta.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * 01: No se pudo abrir el archivo
+ **************************************************/
+f25ErrorRuta:
+    mov x0, STDERR                  // Descriptor de error estándar
+    ldr x1, =Error01                // Mensaje del error #01
+    ldr x2, =LEN_ERROR01            // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    b solicitar_ruta
+    b f04SolicitarRuta
 
-error_eleccion_usuario:
-    mov x0, 2
-    ldr x1, =Msg_error_eleccion
-    ldr x2, =Len_msg_error_eleccion
-    mov x8, 64
+/*****Nombre***************************************
+ * f26ErrorEleccion:
+ *****Descripción**********************************
+ * Muestra el error de opción inválida y regresa al menú.
+ *****Retorno**************************************
+ * Ninguno. Continúa en f09MostrarMenu.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * 02: La opción elegida es inválida
+ **************************************************/
+f26ErrorEleccion:
+    mov x0, STDERR                  // Descriptor de error estándar
+    ldr x1, =Error02                // Mensaje del error #02
+    ldr x2, =LEN_ERROR02            // Longitud del mensaje
+    mov x8, SYS_WRITE               // Syscall write
     svc 0
-    b mostrar_Menu
+    b f09MostrarMenu
 
-salir:
-    mov x0, 0
-    mov x8, 93
+/*****Nombre***************************************
+ * f27Salir:
+ *****Descripción**********************************
+ * Termina el programa con código de salida 0.
+ *****Retorno**************************************
+ * Ninguno. El programa finaliza.
+ *****Entradas*************************************
+ * Ninguna
+ *****Errores**************************************
+ * Ninguno
+ **************************************************/
+f27Salir:
+    mov x0, 0                       // Código de salida
+    mov x8, SYS_EXIT                // Syscall exit
     svc 0
